@@ -1,0 +1,200 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import requests
+import threading
+import subprocess
+import time
+from PIL import Image, ImageTk
+
+class RealVPNClient:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Real VPN Client")
+        self.root.geometry("400x400")
+        self.root.resizable(False, False)
+
+        # Текущий IP
+        self.current_ip = "Неизвестно"
+        self.current_country = "Неизвестно"
+        self.is_connected = False
+
+        # GUI
+        self.setup_ui()
+
+    def setup_ui(self):
+        # Стиль
+        self.style = ttk.Style()
+        self.style.configure("TFrame", background="#f0f0f0")
+        self.style.configure("TLabel", background="#f0f0f0", font=("Arial", 10))
+        self.style.configure("TButton", background="#4CAF50", foreground="white", font=("Arial", 10, "bold"))
+
+        # Главный фрейм
+        self.main_frame = ttk.Frame(self.root)
+        self.main_frame.pack(pady=20)
+
+        # Заголовок
+        self.title_label = ttk.Label(self.main_frame, text="REAL VPN CLIENT", font=("Arial", 16, "bold"))
+        self.title_label.pack(pady=10)
+
+        # Статус
+        self.status_label = ttk.Label(self.main_frame, text="Статус: Отключено", font=("Arial", 12))
+        self.status_label.pack(pady=5)
+
+        # Информация о IP
+        self.ip_frame = ttk.Frame(self.main_frame)
+        self.ip_frame.pack(pady=10)
+
+        self.ip_text = ttk.Label(self.ip_frame, text="Ваш IP:")
+        self.ip_text.grid(row=0, column=0, sticky="w")
+
+        self.ip_value = ttk.Label(self.ip_frame, text=self.current_ip, font=("Arial", 10, "bold"))
+        self.ip_value.grid(row=0, column=1, sticky="w")
+
+        self.country_text = ttk.Label(self.ip_frame, text="Страна:")
+        self.country_text.grid(row=1, column=0, sticky="w")
+
+        self.country_value = ttk.Label(self.ip_frame, text=self.current_country, font=("Arial", 10, "bold"))
+        self.country_value.grid(row=1, column=1, sticky="w")
+
+        # Кнопки управления
+        self.button_frame = ttk.Frame(self.main_frame)
+        self.button_frame.pack(pady=20)
+
+        self.connect_button = ttk.Button(
+            self.button_frame,
+            text="Подключиться (SOCKS5)",
+            command=lambda: self.connect_vpn("socks5"),
+            width=20
+        )
+        self.connect_button.pack(pady=5)
+
+        self.connect_http_button = ttk.Button(
+            self.button_frame,
+            text="Подключиться (HTTP)",
+            command=lambda: self.connect_vpn("http"),
+            width=20
+        )
+        self.connect_http_button.pack(pady=5)
+
+        self.tor_button = ttk.Button(
+            self.button_frame,
+            text="Сменить IP через Tor",
+            command=self.change_ip_tor,
+            width=20
+        )
+        self.tor_button.pack(pady=5)
+
+        self.disconnect_button = ttk.Button(
+            self.button_frame,
+            text="Отключиться",
+            command=self.disconnect_vpn,
+            state="disabled",
+            width=20
+        )
+        self.disconnect_button.pack(pady=5)
+
+        # Обновляем IP при запуске
+        self.update_ip_info()
+
+    def update_ip_info(self):
+        """Получает текущий IP через API"""
+        try:
+            response = requests.get("https://api.ipify.org?format=json", timeout=5)
+            if response.status_code == 200:
+                self.current_ip = response.json()["ip"]
+                # Получаем страну
+                country_response = requests.get(f"https://ipapi.co/{self.current_ip}/country_name/", timeout=5)
+                self.current_country = country_response.text if country_response.status_code == 200 else "Неизвестно"
+            else:
+                self.current_ip = "Ошибка получения"
+        except:
+            self.current_ip = "Нет интернета"
+
+        self.ip_value.config(text=self.current_ip)
+        self.country_value.config(text=self.current_country)
+
+    def connect_vpn(self, proxy_type):
+        """Подключается к прокси (SOCKS5/HTTP)"""
+        def connect_thread():
+            self.connect_button.config(state="disabled")
+            self.connect_http_button.config(state="disabled")
+            self.status_label.config(text="Статус: Подключение...")
+
+            # Пример прокси (можно заменить на свои)
+            proxy_host = "ваш_прокси_сервер"  # Например, 123.123.123.123
+            proxy_port = "1080"  # Порт SOCKS5
+
+            try:
+                # Здесь должна быть логика подключения через requests с прокси
+                proxies = {
+                    "http": f"{proxy_type}://{proxy_host}:{proxy_port}",
+                    "https": f"{proxy_type}://{proxy_host}:{proxy_port}"
+                }
+                test_response = requests.get("https://api.ipify.org?format=json", proxies=proxies, timeout=10)
+                
+                if test_response.status_code == 200:
+                    new_ip = test_response.json()["ip"]
+                    self.current_ip = new_ip
+                    self.root.after(0, lambda: [
+                        self.ip_value.config(text=new_ip),
+                        self.status_label.config(text="Статус: Подключено"),
+                        self.disconnect_button.config(state="normal"),
+                        messagebox.showinfo("Успех", f"Подключено! Новый IP: {new_ip}")
+                    ])
+                    self.is_connected = True
+                else:
+                    raise Exception("Ошибка прокси")
+            except Exception as e:
+                self.root.after(0, lambda: [
+                    messagebox.showerror("Ошибка", f"Не удалось подключиться: {str(e)}"),
+                    self.status_label.config(text="Статус: Ошибка"),
+                    self.connect_button.config(state="normal"),
+                    self.connect_http_button.config(state="normal")
+                ])
+
+        threading.Thread(target=connect_thread, daemon=True).start()
+
+    def change_ip_tor(self):
+        """Меняет IP через Tor (если установлен)"""
+        def tor_thread():
+            try:
+                # Проверяем, работает ли Tor
+                tor_check = subprocess.run(["tor", "--version"], capture_output=True)
+                if tor_check.returncode != 0:
+                    raise Exception("Tor не установлен")
+
+                # Перезапускаем Tor для нового IP
+                subprocess.run(["sudo", "service", "tor", "restart"], check=True)
+                time.sleep(3)  # Ждем переподключения
+
+                # Проверяем новый IP
+                proxies = {"http": "socks5://localhost:9050", "https": "socks5://localhost:9050"}
+                response = requests.get("https://api.ipify.org?format=json", proxies=proxies, timeout=10)
+                
+                if response.status_code == 200:
+                    new_ip = response.json()["ip"]
+                    self.root.after(0, lambda: [
+                        self.ip_value.config(text=new_ip),
+                        messagebox.showinfo("Успех", f"Новый IP через Tor: {new_ip}")
+                    ])
+                else:
+                    raise Exception("Tor не отвечает")
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("Ошибка", str(e)))
+
+        threading.Thread(target=tor_thread, daemon=True).start()
+
+    def disconnect_vpn(self):
+        """Отключает прокси"""
+        self.is_connected = False
+        self.status_label.config(text="Статус: Отключено")
+        self.disconnect_button.config(state="disabled")
+        self.connect_button.config(state="normal")
+        self.connect_http_button.config(state="normal")
+        self.update_ip_info()
+        messagebox.showinfo("Отключено", "Прокси отключен")
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = RealVPNClient(root)
+    root.mainloop()
